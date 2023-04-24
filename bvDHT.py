@@ -124,8 +124,18 @@ def handleRequests(connInfo):
     sock, connAddr = connInfo
     command = getLine(sock)
 
+###################FIXME######################
     if command == "JOIN_DHT_NOW":
+        sock.send(NEXT_PEER.encode())
+        sock.send(NUM_FILES.encode())
+        for i in range(numFiles):
+            fileHashPos = getHashKey(fileName)
+            size = fileName.size
+            sock.send(fileHashPos)
+            sendFile(fileHashPos, size, sock)
+
         pass
+
     elif command == "CLOSEST_PEER":
         key = recvMsg(sock, 56).decode()
         closest = closestKey(key)
@@ -169,7 +179,7 @@ def closestPeer(Addr, key):
         closestSock.send(msg.encode())
 
         closestSock.send(key.encode())
-        recvAddr = getline()
+        recvAddr = getline(closestSock)
 
         closestSock.close()
         if recvAddr == askAddr:
@@ -182,13 +192,19 @@ def closestPeer(Addr, key):
 #FIXME
 def join(IP, port):
     global PREV_PEER, NEXT_PEER, FINGERS
+    closestSock = socket(AF_INET, SOCK_STREAM)
+    closestSock.connect((IP, port))
+    closestSock.send(("CLOSEST_PEER").encode())
+    key = getHashKey(MY_ADDR)
+    closestSock.send(key.encode())
 
-    joinSock = socket(AF_INET, SOCK_STREAM)
-    joinSock.connect( (IP, port))
+    closestAddr = getline(closestSock)
+    IP, port = closestAddr.split(":")
+
     msg = "JOIN_DHT_NOW"
-    joinSock.send(msg.encode())
-    sendUserID(IP, port, joinSock)
-
+    closestSock.send(msg.encode())
+    sendUserID(IP, port, closestSock)
+    
     #receive our new next UserID
     NEXT_PEER = getline()
 
@@ -202,8 +218,6 @@ def join(IP, port):
 
 
     joinSock.send("OK\n".encode())
-
-
 
     
     
