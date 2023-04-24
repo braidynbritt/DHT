@@ -34,10 +34,10 @@ def printFingers():
     print("My Address")
     print("   {}".format(MY_ADDR))
     print("   {}".format(myKey))
-    print("Pred Address")
+    print("Prev Address")
     print("   {}".format(PREV_PEER))
     print("   {}".format(prevKey))
-    print("Succ Address")
+    print("Next Address")
     print("   {}".format(NEXT_PEER))
     print("   {}".format(nextKey))
     i = 0
@@ -130,6 +130,23 @@ def handleRequests(connInfo):
         key = recvMsg(sock, 56).decode()
         closest = closestKey(key)
         sendUserID(closest, sock)
+    elif command == "INSERT_FILE!":
+        pass
+    elif command == "DELETE_FILE!":
+        pass
+    elif command == "TIME_2_SPLIT":
+        pass
+    elif command == "CONTAIN_FILE":
+        pass
+    elif commmand == "GET_DATA_NOW":
+        pass
+    elif command == "UPDATE_PEER_":
+        user = getline(sock)
+
+        #update the finger table
+        #will probably make a function for this
+
+        sock.send("OK".encode())
 
     pass
 
