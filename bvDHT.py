@@ -107,9 +107,47 @@ def recvFile(fileHashPos, sock, dest):
         outFile.write(data)
     
 
-#FIXME
 def transferFiles(sock, connectorHash, Type):
-    pass
+    # Retreive files available for sending
+    folder = Path("./repository")
+    if not folder.exists():
+        folder.mkdir(parents=True, exist_ok=True)
+    # Retrieve our file hashes
+    fileHashes = []
+    for entry in folder.iterdir():
+        if not entry.is_dir():
+            fileHashes.append(entry.name)
+    # Get number of files to send
+    filesToSend = []
+    succHash = getHashKey(SUCC_ADDR)
+
+    if Type == "conn":
+        # Find which files to transfer considering wrap around
+        if succHash < connectorHash:
+            for fileHash in fileHashes:
+                if fileHash < succHash or fileHash > connectorHash:
+                    filesToSend.append(fileHash)
+        # Find files when no wrap around
+        else:
+            for fileHash in fileHashes:
+                if fileHash > connectorHash:
+                    filesToSend.append(fileHash)
+    else:
+        # Add all files we own
+        filesToSend = getMyFileKeys()
+
+    # Send number of files followed by each file following protocol
+    sz = len(filesToSend)
+    sock.send(sz.to_bytes(4, byteorder="little", signed=False))
+    for fileHash in filesToSend:
+        fileBytes = readFile(fileHash, "")
+        sendFile(fileHash, fileBytes, sock, "")
+
+    return filesToSend
+
+def getMyFiles():
+    fileKeys = os.listdir('./dht')
+    return fileKeys
 
 
 def listen(listener):
@@ -279,6 +317,69 @@ def createFingerOffsets(MY_ADDR):
 
     return offsetList
 
+
+def updateFingerTable():
+    global FINGER_TABLE
+    FINGER_TABLE = FINGERS
+    FINGER_TABLE.append((getHashKey(MY_ADDR), MY_ADDR))
+    FINGER_TABLE.append((getHashKey(SUCC_ADDR), SUCC_ADDR))
+    FINGER_TABLE.append((getHashKey(PRED_ADDR), PRED_ADDR))
+    FINGER_TABLE.sort()
+    printLock.acquire()
+    printFingers()
+    printLock.release()
+
+
+def updateFingers(peerAddr):
+    global FINGERS
+    peerKey = getHashKey(peerAddr)
+    for i in range(len(FINGERS)):
+        currFingKey = getHashKey(FINGERS[i][1])
+        # i = 1 and wrap around
+        if i == 0 and FINGERS[-1][0] > FINGERS[i][0]:
+            # is current finger value in keyspace
+            if currFingKey > FINGERS[-1][0] or currFingKey < FINGERS[i][0]:
+                if currFingKey > FINGERS[-1][0]:
+                    if peerKey < FINGERS[i][0] or peerKey > currFingKey:
+                        FINGERS[i] = (FINGERS[i][0], peerAddr)
+                elif peerKey > currFingKey and peerKey < FINGERS[i][0]:
+                    FINGERS[i] = (FINGERS[i][0], peerAddr)
+            elif peerKey > currFingKey or peerKey < FINGERS[i][0]:
+                FINGERS[i] = (FINGERS[i][0], peerAddr)
+        # i != 1 and wrap around
+        elif i > 0 and FINGERS[i-1][0] > FINGERS[i][0]:
+            # is current finger value in keyspace
+            if currFingKey > FINGERS[i-1][0] or currFingKey < FINGERS[i][0]:
+                if currFingKey > FINGERS[i-1][0]:
+                    if peerKey < FINGERS[i][0] or peerKey > currFingKey:
+                        FINGERS[i] = (FINGERS[i][0], peerAddr)
+                elif peerKey > currFingKey and peerKey < FINGERS[i][0]:
+                    FINGERS[i] = (FINGERS[i][0], peerAddr)
+            elif peerKey > currFingKey or peerKey < FINGERS[i][0]:
+                FINGERS[i] = (FINGERS[i][0], peerAddr)
+        # any i no wrap around
+        else:
+            # is current finger value in keyspace
+            if currFingKey < FINGERS[i][0] and currFingKey > FINGERS[i-1][0]:
+                if peerKey < FINGERS[i][0] and peerKey > currFingKey:
+                    FINGERS[i] = (FINGERS[i][0], peerAddr)
+            else:
+                if currFingKey > FINGERS[i][0]:
+                    if peerKey > currFingKey or peerKey < FINGERS[i][0]:
+                        FINGERS[i] = (FINGERS[i][0], peerAddr)
+                else:
+                    if peerKey > currFingKey and peerKey < FINGERS[i][0]:
+                        FINGERS[i] = (FINGERS[i][0], peerAddr)
+
+def setFingers(Addr):
+    global FINGERS
+
+    FINGERS = []
+    offsets = getFingerOffsets(MY_ADDR)
+    for finger in offsets:
+        recvAddress = closestNow(Addr, finger)
+        FINGERS.append((finger, recvAddress))
+    updateFingerTable()
 
 # Finds out who we know that is closest to the key
 def closestToKey(key):
