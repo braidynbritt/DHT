@@ -141,7 +141,8 @@ def transferFiles(sock, connectorHash, Type):
 
     # Send number of files followed by each file following protocol
     sz = len(filesToSend)
-    sock.send(sz.to_bytes(4, byteorder="little", signed=False))
+    sz = str(sz) + '\n'
+    sock.send(sz.encode())
     for fileHash in filesToSend:
         fileBytes = readFile(fileHash, "")
         sendFile(fileHash, fileBytes, sock)
@@ -173,12 +174,13 @@ def listen(listener):
 #FIXME
 def handleRequests(sock, connAddr):
     global PREV_PEER, NEXT_PEER
-    command = getline(sock)
+    command = recvMsg(sock, 12).decode()
 
 ###################FIXME######################
     if command == "JOIN_DHT_NOW":
         senderAddr = getline(sock)
-        sock.send(NEXT_PEER.encode())
+
+        sock.send((f'{NEXT_PEER}\n').encode())
 
         files = transferFiles(sock, getHashKey(senderAddr),"JOIN")
         deleteFiles(files)
@@ -189,7 +191,8 @@ def handleRequests(sock, connAddr):
     elif command == "CLOSEST_PEER":
         key = recvMsg(sock, 56).decode()
         closest = closestToKey(key)
-        sendUserID(closest, sock)
+        closestIP, closestsPort = closest.split(":")
+        sendUserID(closestIP, closestPort, sock)
     elif command == "INSERT_FILE!":
         pass
     elif command == "DELETE_FILE!":
@@ -302,7 +305,7 @@ def join(IP, port):
     nextIP, nextPort = NEXT_PEER.split(":")
     nextPort = int(nextPort)
     nextSock = socket(AF_INET, SOCK_STREAM)
-    nextSock.connect((nextIP, nextIP))
+    nextSock.connect((nextIP, nextPort))
     nextSock.send(("UPDATE_PEER_").encode())
     sendUserID(nextIP, nextPort, nextSock)
     ack = getline(nextSock)
@@ -491,9 +494,9 @@ if __name__ == '__main__':
     folder = Path('./dht')
     if not folder.exists():
         folder.mkdir(parents=True, exist_ok=True)
-    else:
-        shutil.rmtree(folder)
-        folder.mkdir(parents=True, exist_ok=True)
+#    else:
+#        shutil.rmtree(folder)
+#        folder.mkdir(parents=True, exist_ok=True)
 
     if len(sys.argv) == 1:
         startNewSystem()
