@@ -337,15 +337,15 @@ def getData():
     pass
 
 #FIXME
-def Contains():
+def contains():
     pass
 
 #FIXME
-def Insert():
+def insert():
     pass
 
 #FIXME
-def Delete():
+def delete():
     pass
 
 def createFingerOffsets(MY_ADDR):
@@ -529,15 +529,16 @@ if __name__ == '__main__':
             leave()
             running = False
         else:
-            #FIXME
+            try:
+                fileName = line.split()[1]
+            except:
+                print("Need to include a file name")
+                continue
             if command == "get":
-                pass
-            #FIXME
+                getData(fileName)
             elif command == "contains":
-                pass
-            #FIXME
+                contains(fileName)
             elif command == "insert":
-                pass
-            #FIXME
+                insert(fileName)
             elif command == "delete":
-                pass
+                delete(fileName)
