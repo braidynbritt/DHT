@@ -66,9 +66,13 @@ def getline(conn):
 def recvMsg(sock, numBytes):
     msg = b''
     while(len(msg) < numBytes):
-        msg += sock.recv(numBytes - len(msg))
-        if len(msg) == 0:
+        print(msg)
+        temp = sock.recv(numBytes- len(msg))
+        if len(temp) == 0:
             break
+        msg += temp
+
+    print(f"final msg: {msg}")
     return msg
 
 def readFile(fileHashPos, dest):
@@ -85,6 +89,7 @@ def readFile(fileHashPos, dest):
     return fileBytes
 
 def sendFile(fileHashPos, fileBytes, sock):
+    print("send File")
     sz = len(fileBytes)
     sz = str(sz) + "\n"
     sock.send(fileHashPos.encode())
@@ -111,13 +116,16 @@ def getMyFiles():
     return fileKeys
 
 def transferFiles(sock, connectorHash, Type):
+    print("Transfer")
     # Retreive files available for sending
     folder = Path("./dht")
     if not folder.exists():
         folder.mkdir(parents=True, exist_ok=True)
     # Retrieve our file hashes
     fileHashes = []
+    print(f"{folder.iterdir}")
     for entry in folder.iterdir():
+        print(f"i{entry}")
         if not entry.is_dir():
             fileHashes.append(entry.name)
     # Get number of files to send
@@ -140,6 +148,7 @@ def transferFiles(sock, connectorHash, Type):
         filesToSend = getMyFiles()
 
     # Send number of files followed by each file following protocol
+    print(filesToSend)
     sz = len(filesToSend)
     sz = str(sz) + '\n'
     sock.send(sz.encode())
@@ -161,15 +170,11 @@ def deleteFiles(toDelete):
             return False
 
 def listen(listener):
-    conn, addr = listener.accept()
     running = True
     while running:
+        conn, addr = listener.accept()
         handleRequests(conn, addr)
-#    running = True
-#    while running:
-#        print("before listen thread")
-#        threading.Thread(target=handleRequests, args=(listener.accept(),), daemon=True).start()
-#        print("after listen thread")
+
 
 #FIXME
 def handleRequests(sock, connAddr):
@@ -191,7 +196,7 @@ def handleRequests(sock, connAddr):
     elif command == "CLOSEST_PEER":
         key = recvMsg(sock, 56).decode()
         closest = closestToKey(key)
-        closestIP, closestsPort = closest.split(":")
+        closestIP, closestPort = closest.split(":")
         sendUserID(closestIP, closestPort, sock)
     elif command == "INSERT_FILE!":
         pass
@@ -202,7 +207,19 @@ def handleRequests(sock, connAddr):
     elif command == "CONTAIN_FILE":
         pass
     elif command == "GET_DATA_NOW":
-        pass
+        fileHashPos = recvAll(sock, 56)
+        closest = cloesetToKey(fileHashPos)
+        if closest == MY_ADDR:
+            sock.send("OK".encode())
+            if containedLocal(fileHashPos) == True:
+                sock.send("OK".encode())
+                fileBytes = rreadFile(fileHashPos, "")
+                sendFile(fileHashPos, fileBytes, sock, "get")
+            else:
+                sock.send("FU".encode())
+        else:
+            sock.send("FU".encode())
+
     elif command == "UPDATE_PEER_":
         user = getline(sock)
         NEXT_PEER = user
@@ -252,6 +269,8 @@ def join(IP, port):
     port = int(port)
     closestSock = socket(AF_INET, SOCK_STREAM)
     print("Before connect")
+    print(IP)
+    print(port)
     closestSock.connect((IP, port))
     closestSock.send(("CLOSEST_PEER").encode())
     print("Sent command")
@@ -292,26 +311,44 @@ def join(IP, port):
 
 
     #receive the number of files we are taking
-    numFiles = int(getline(closestSock))
+    numFiles = getline(closestSock)
 
-    for i in range(numFiles):
-        #recieve files hashedPosition
-        
-        fileHashPos = recvMsg(joinSock, 56)
-        print(fileHashPos)
-        recvFile(fileHashPos, joinSock, "")
+    print(numFiles)
+    numFiles = int(numFiles)
+
+    if numFiles > 0:
+        for i in range(numFiles):
+            #recieve files hashedPosition
+            print("before")
+            fileHashPos = recvMsg(closestSock, 56).decode()
+            print("after")
+            print(fileHashPos)
+            recvFile(fileHashPos, closestSock, "")
 
 
+    closestSock.close()
+
+    print("before next")
     nextIP, nextPort = NEXT_PEER.split(":")
+    print(f'IP: {nextIP} Port: {nextPort}')
     nextPort = int(nextPort)
     nextSock = socket(AF_INET, SOCK_STREAM)
     nextSock.connect((nextIP, nextPort))
+    print("Connected")
     nextSock.send(("UPDATE_PEER_").encode())
     sendUserID(nextIP, nextPort, nextSock)
     ack = getline(nextSock)
-    if ack == "OK":
-        joinSock.send("OK\n".encode())
+    nextSock.close()
 
+    closestSock = socket(AF_INET, SOCK_STREAM)
+    closestSock.connect((IP, port))
+
+    if ack == "OK":
+        closestSock.send("OK".encode())
+
+    closestSock.close()
+
+    print("JOINED")
     
     
 #This only works if there is only one person in the dht
@@ -331,10 +368,39 @@ def updatePeer():
     msg = "UPDATE_PEER_"
     pass
 
-#FIXME
-def getData():
+
+def getData(fileName):
     msg = "GET_DATA_NOW"
-    pass
+
+    key = getHashKey(fileName)
+    if containedLocal(key) == True:
+        print(f"Copying {fileName} from dht to your local directory")
+        shutil.copy(f"dht/{key}", key)
+    else:
+        if contains(fileName):
+            print("The file is here")
+            closestAddr = closestToKey(key)
+            closest = closest.split(":")
+            sock = socket(AF_INET, SOCK_STREAM)
+            sock.connect((closest[0], int(closest[1])))
+            sock.send(msg.encode())
+
+            sock.send(key.encode())
+            ack = recvMsg(sock, 2)
+            if ack == "FU":
+                getData(fileName)
+            else:
+                ack = recvMsg(sock, 2)
+                if ack == "FU":
+                    print(f"{fileName} does not exist anymore.")
+                else:
+                    recvFile(sock, key, "local")
+                    print(f"Received {fileName}")
+        else:
+            print(f"{fileName} does not exist anymore.")
+
+    sock.close()
+
 
 #FIXME
 def contains():
@@ -451,6 +517,11 @@ def closestToKey(key):
             return FINGER_TABLE[i][1]
 
     return FINGER_TABLE[-1][1]
+
+def containedLoacl(fileHashPos):
+    if fileHash in getMyFiles():
+        return True
+    return False
 
 
 def startNewSystem():
