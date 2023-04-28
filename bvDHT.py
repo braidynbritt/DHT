@@ -23,13 +23,17 @@ COMMANDS = ['leave', 'get', 'contains', 'insert', 'remove']
 listeningPort = None
 
 
+def getLocalIPAddress():
+    s = socket(AF_INET, SOCK_DGRAM)
+    s.connect(("8.8.8.8", 80))
+    return s.getsockname()[0]
+
 # Function that helps to print out our finger table nicely
 def printFingers():
     myKey = getHashKey(MY_ADDR)
     prevKey = getHashKey(PREV_PEER)
     nextKey = getHashKey(NEXT_PEER)
     print("--------------------------")
-    print("-      FINGER TABLE      -")
     print("--------------------------")
     print("My Address")
     print("   {}".format(MY_ADDR))
@@ -40,6 +44,7 @@ def printFingers():
     print("Next Address")
     print("   {}".format(NEXT_PEER))
     print("   {}".format(nextKey))
+    print("--------------------------")
     i = 0
     for finger in FINGER_TABLE:
         if finger[0] != myKey and finger[0] != prevKey and finger[0] != nextKey:
@@ -48,9 +53,14 @@ def printFingers():
             print("   {}".format(finger[0]))
             i = i+1
 
+def getHashKey(key):
+    hashedKey = hashlib.sha224(key.encode()).hexdigest()
+    return hashedKey
+
 
 def sendUserID(IP, port, sock):
     userID = IP + ":" + str(port) + "\n"
+    print(f"SENDING: {userID=}")
     sock.send(userID.encode())
 
 # Retrieves stuff until we hit a newline
@@ -66,13 +76,11 @@ def getline(conn):
 def recvMsg(sock, numBytes):
     msg = b''
     while(len(msg) < numBytes):
-        print(msg)
         temp = sock.recv(numBytes- len(msg))
         if len(temp) == 0:
             break
         msg += temp
 
-    print(f"final msg: {msg}")
     return msg
 
 def readFile(fileHashPos, dest):
@@ -175,28 +183,37 @@ def listen(listener):
         conn, addr = listener.accept()
         handleRequests(conn, addr)
 
-
 #FIXME
 def handleRequests(sock, connAddr):
     global PREV_PEER, NEXT_PEER
     command = recvMsg(sock, 12).decode()
+    print(f"COMMAND {command}")
 
 ###################FIXME######################
     if command == "JOIN_DHT_NOW":
         senderAddr = getline(sock)
 
         sock.send((f'{NEXT_PEER}\n').encode())
+        print("After sending next")
+
+        NEXT_PEER = senderAddr
+
+        print(NEXT_PEER)
+        updateFingers(NEXT_PEER)
+
+        updateFingerTable()
 
         files = transferFiles(sock, getHashKey(senderAddr),"JOIN")
         deleteFiles(files)
-        NEXT_PEER = senderAddr
-
         
 
     elif command == "CLOSEST_PEER":
+        print("Handling CLOSEST_PEER request...")
         key = recvMsg(sock, 56).decode()
+        print(f"  - {key=}")
         closest = closestToKey(key)
         closestIP, closestPort = closest.split(":")
+        print(f"  - ({closestIP=}, {closestPort=})")
         sendUserID(closestIP, closestPort, sock)
     elif command == "INSERT_FILE!":
         pass
@@ -221,6 +238,7 @@ def handleRequests(sock, connAddr):
             sock.send("FU".encode())
 
     elif command == "UPDATE_PEER_":
+        print("UPDATE")
         user = getline(sock)
         NEXT_PEER = user
         #update the finger table
@@ -232,10 +250,6 @@ def handleRequests(sock, connAddr):
         sock.send("OK".encode())
 
     pass
-
-def getHashKey(key):
-    hashedKey = hashlib.sha224(key.encode()).hexdigest()
-    return hashedKey
 
 
 def closestPeer(Addr, key):
@@ -267,19 +281,12 @@ def join(IP, port):
     
     global PREV_PEER, NEXT_PEER, FINGERS
     port = int(port)
+    addr = IP+":"+str(port)
+    closestAddr = closestPeer(addr, getHashKey(addr))
+    print(f"Here is the closest {closestAddr}")
+    closestIP, closestPort = closestAddr.split(":")
     closestSock = socket(AF_INET, SOCK_STREAM)
-    print("Before connect")
-    print(IP)
-    print(port)
     closestSock.connect((IP, port))
-    closestSock.send(("CLOSEST_PEER").encode())
-    print("Sent command")
-    key = getHashKey(MY_ADDR)
-    closestSock.send(key.encode())
-
-    closestAddr = getline(closestSock)
-    print(closestAddr)
-    IP, port = closestAddr.split(":")
 
     msg = "JOIN_DHT_NOW"
     closestSock.send(msg.encode())
@@ -292,7 +299,7 @@ def join(IP, port):
     PREV_PEER = closestAddr
     print("PREV")
 
-    #FINGER_TABLE = []
+    FINGER_TABLE = []
     offsets = createFingerOffsets(MY_ADDR)
 
     for finger in offsets:
@@ -326,7 +333,7 @@ def join(IP, port):
             recvFile(fileHashPos, closestSock, "")
 
 
-    closestSock.close()
+    #closestSock.close()
 
     print("before next")
     nextIP, nextPort = NEXT_PEER.split(":")
@@ -335,13 +342,15 @@ def join(IP, port):
     nextSock = socket(AF_INET, SOCK_STREAM)
     nextSock.connect((nextIP, nextPort))
     print("Connected")
-    nextSock.send(("UPDATE_PEER_").encode())
-    sendUserID(nextIP, nextPort, nextSock)
+    nextSock.send("UPDATE_PEER_".encode())
+    print("sent UPDATE_PEER_")
+    sendUserID(MY_ADDR.split(":")[0], int(MY_ADDR.split(":")[1]), nextSock)
     ack = getline(nextSock)
+    print(f"Receives an acknowledgement {ack}")
     nextSock.close()
 
-    closestSock = socket(AF_INET, SOCK_STREAM)
-    closestSock.connect((IP, port))
+#closestSock = socket(AF_INET, SOCK_STREAM)
+#    closestSock.connect((IP, port))
 
     if ack == "OK":
         closestSock.send("OK".encode())
@@ -440,7 +449,8 @@ def createFingerOffsets(MY_ADDR):
 
 
 def updateFingerTable():
-    global FINGER_TABLE
+    global FINGER_TABLE, FINGERS
+    print(f'FINGERS: {FINGERS}')
     FINGER_TABLE = FINGERS
     FINGER_TABLE.append((getHashKey(MY_ADDR), MY_ADDR))
     FINGER_TABLE.append((getHashKey(NEXT_PEER), NEXT_PEER))
@@ -457,18 +467,27 @@ def updateFingers(peerAddr):
     for i in range(len(FINGERS)):
         currFingKey = getHashKey(FINGERS[i][1])
         # i = 1 and wrap around
+        print(f"TYPE: {type(FINGERS[-1][0])}")
         if i == 0 and FINGERS[-1][0] > FINGERS[i][0]:
+            print("IN IF")
             # is current finger value in keyspace
+            print(f'currFing: {currFingKey}')
             if currFingKey > FINGERS[-1][0] or currFingKey < FINGERS[i][0]:
+                print("IN FIRST IF")
                 if currFingKey > FINGERS[-1][0]:
+                    print("IN SECOND IF")
                     if peerKey < FINGERS[i][0] or peerKey > currFingKey:
+                        print("IN THIRD IF")
                         FINGERS[i] = (FINGERS[i][0], peerAddr)
                 elif peerKey > currFingKey and peerKey < FINGERS[i][0]:
+                    print("IN SECOND ELIF")
                     FINGERS[i] = (FINGERS[i][0], peerAddr)
             elif peerKey > currFingKey or peerKey < FINGERS[i][0]:
+                print("IN FIRST ELIF")
                 FINGERS[i] = (FINGERS[i][0], peerAddr)
         # i != 1 and wrap around
         elif i > 0 and FINGERS[i-1][0] > FINGERS[i][0]:
+            print("IN ELIF")
             # is current finger value in keyspace
             if currFingKey > FINGERS[i-1][0] or currFingKey < FINGERS[i][0]:
                 if currFingKey > FINGERS[i-1][0]:
@@ -480,16 +499,24 @@ def updateFingers(peerAddr):
                 FINGERS[i] = (FINGERS[i][0], peerAddr)
         # any i no wrap around
         else:
+            print("IN ELSE")
             # is current finger value in keyspace
             if currFingKey < FINGERS[i][0] and currFingKey > FINGERS[i-1][0]:
+                print("IN FIRST IF")
                 if peerKey < FINGERS[i][0] and peerKey > currFingKey:
+                    print("IN SECOND IF")
                     FINGERS[i] = (FINGERS[i][0], peerAddr)
             else:
+                print("IN FIRST ELSE")
                 if currFingKey > FINGERS[i][0]:
+                    print("IN FIRST IF OF ELSE")
                     if peerKey > currFingKey or peerKey < FINGERS[i][0]:
+                        print("IN SECOND IF OF ELSE")
                         FINGERS[i] = (FINGERS[i][0], peerAddr)
                 else:
+                    print("IN ELSE OF ELSE")
                     if peerKey > currFingKey and peerKey < FINGERS[i][0]:
+                        print("IN IF IN ELSE OF ELSE")
                         FINGERS[i] = (FINGERS[i][0], peerAddr)
 
 def setFingers(Addr):
@@ -553,11 +580,11 @@ if __name__ == '__main__':
     listener.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     listener.bind(('', 0))
     listeningPort = listener.getsockname()[1]
-    listener.listen(4)
+    listener.listen(32)
 
     #Set my address
     #host = gethostname()
-    ip = gethostbyname(gethostname())
+    ip = getLocalIPAddress()
     MY_ADDR = f"{ip}:{listeningPort}"
     print(f"Our address: {MY_ADDR}")
 
