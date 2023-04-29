@@ -336,7 +336,7 @@ def join(IP, port):
 
 
 
-   ack = updatePeer(NEXT_PEER)
+    ack = updatePeer(NEXT_PEER)
 
     if ack == "OK":
         closestSock.send("OK".encode())
