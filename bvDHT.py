@@ -14,6 +14,8 @@ printLock = threading.Lock()
 NEXT_PEER = ""
 PREV_PEER = ""
 MY_ADDR = ""
+MY_IP = ""
+MY_PORT = 0
 
 NUM_FINGERS = 5
 FINGER_TABLE = []
@@ -199,6 +201,7 @@ def handleRequests(sock, connAddr):
         NEXT_PEER = senderAddr
 
         print(NEXT_PEER)
+        print(f'Hash: {getHashKey(NEXT_PEER)}')
         updateFingers(NEXT_PEER)
 
         updateFingerTable()
@@ -246,7 +249,7 @@ def handleRequests(sock, connAddr):
         updateFingers(PREV_PEER)
 
         updateFingerTable()
-
+        
         sock.send("OK".encode())
 
     pass
@@ -279,7 +282,7 @@ def closestPeer(Addr, key):
 #FIXME
 def join(IP, port):
     
-    global PREV_PEER, NEXT_PEER, FINGERS
+    global PREV_PEER, NEXT_PEER, FINGERS, MY_IP, MY_PORT
     port = int(port)
     addr = IP+":"+str(port)
     closestAddr = closestPeer(addr, getHashKey(addr))
@@ -290,7 +293,7 @@ def join(IP, port):
 
     msg = "JOIN_DHT_NOW"
     closestSock.send(msg.encode())
-    sendUserID(IP, port, closestSock)
+    sendUserID(MY_IP, MY_PORT, closestSock)
     
     #receive our new next UserID
     print("before NEXT")
@@ -309,8 +312,6 @@ def join(IP, port):
     updateFingers(NEXT_PEER)
 
     updateFingerTable()
-
-    printFingers()
 
     print("FINGERS!!!")
     if PREV_PEER != NEXT_PEER:
@@ -345,6 +346,7 @@ def join(IP, port):
     nextSock.send("UPDATE_PEER_".encode())
     print("sent UPDATE_PEER_")
     sendUserID(MY_ADDR.split(":")[0], int(MY_ADDR.split(":")[1]), nextSock)
+    print("Send Ack")
     ack = getline(nextSock)
     print(f"Receives an acknowledgement {ack}")
     nextSock.close()
@@ -468,10 +470,12 @@ def updateFingers(peerAddr):
         currFingKey = getHashKey(FINGERS[i][1])
         # i = 1 and wrap around
         print(f"TYPE: {type(FINGERS[-1][0])}")
+        print(f'currFing: {currFingKey}')
+        print(f'FINGER[I]: {FINGERS[i][0]}')
+        print(f'peerKey: {peerKey}')
         if i == 0 and FINGERS[-1][0] > FINGERS[i][0]:
             print("IN IF")
             # is current finger value in keyspace
-            print(f'currFing: {currFingKey}')
             if currFingKey > FINGERS[-1][0] or currFingKey < FINGERS[i][0]:
                 print("IN FIRST IF")
                 if currFingKey > FINGERS[-1][0]:
@@ -585,6 +589,8 @@ if __name__ == '__main__':
     #Set my address
     #host = gethostname()
     ip = getLocalIPAddress()
+    MY_IP = ip
+    MY_PORT = listeningPort
     MY_ADDR = f"{ip}:{listeningPort}"
     print(f"Our address: {MY_ADDR}")
 
