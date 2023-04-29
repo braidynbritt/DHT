@@ -620,6 +620,9 @@ if __name__ == '__main__':
 #        shutil.rmtree(folder)
 #        folder.mkdir(parents=True, exist_ok=True)
 
+    #for fileName in os.listdir(Path.cwd() / 'dht/'):
+    #    os.rename(f'{Path.cwd()}/dht/{fileName}', f'{Path.cwd()}/dht/{getHashKey(fileName)}')
+
     if len(sys.argv) == 1:
         startNewSystem()
     elif len(sys.argv) == 3:
