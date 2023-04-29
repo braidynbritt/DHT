@@ -224,7 +224,16 @@ def handleRequests(sock, connAddr):
     elif command == "DELETE_FILE!":
         pass
     elif command == "TIME_2_SPLIT":
-        pass
+        fileNum = getline(sock)
+        for i in range(0, fileNum):
+            fileHashPos = recvMsg(sock, 56)
+
+            recvFile(fileHashPos, sock, "")
+
+        NEXT_PEER = getline(sock)
+        updatePeer(NEXT_PEER)
+        sock.send("OK".encode())
+        
     elif command == "CONTAIN_FILE":
         pass
     elif command == "GET_DATA_NOW":
@@ -354,8 +363,26 @@ def leave():
     if MY_ADDR == PREV_PEER:
         print("Goodbye")
         exit(0)
+    else:
+        key = getHashKey(MY_ADDR)
 
-    pass
+        prevIP, prevPort = PREV_PEER.split(":")
+        prevSock = socket(AF_INET, SOCK_STREAM)
+        prevSock.connect( (prevIP, int(prevPort)))
+        prevSock.send(msg.encode())
+
+        filesTransfer(prevSock, key, "")
+
+        prevSock.send(NEXT_PEER.encode())
+
+        ack = recvMsg(prevSock, 2)
+
+        if ack == "OK":
+            #prevSocket.close()
+            print("Goodbye")
+            exit(0)
+
+
 
 def updatePeer(peer):
 
@@ -448,9 +475,6 @@ def updateFingerTable():
     global FINGER_TABLE, FINGERS
     print(f'FINGERS: {FINGERS}')
     FINGER_TABLE = FINGERS
-    FINGER_TABLE.append((getHashKey(MY_ADDR), MY_ADDR))
-    FINGER_TABLE.append((getHashKey(NEXT_PEER), NEXT_PEER))
-    FINGER_TABLE.append((getHashKey(PREV_PEER), PREV_PEER))
     FINGER_TABLE.sort()
     printLock.acquire()
     printFingers()
