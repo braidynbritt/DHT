@@ -202,6 +202,7 @@ def handleRequests(sock, connAddr):
 
         print(NEXT_PEER)
         print(f'Hash: {getHashKey(NEXT_PEER)}')
+        
         updateFingers(NEXT_PEER)
 
         updateFingerTable()
@@ -334,25 +335,8 @@ def join(IP, port):
             recvFile(fileHashPos, closestSock, "")
 
 
-    #closestSock.close()
 
-    print("before next")
-    nextIP, nextPort = NEXT_PEER.split(":")
-    print(f'IP: {nextIP} Port: {nextPort}')
-    nextPort = int(nextPort)
-    nextSock = socket(AF_INET, SOCK_STREAM)
-    nextSock.connect((nextIP, nextPort))
-    print("Connected")
-    nextSock.send("UPDATE_PEER_".encode())
-    print("sent UPDATE_PEER_")
-    sendUserID(MY_ADDR.split(":")[0], int(MY_ADDR.split(":")[1]), nextSock)
-    print("Send Ack")
-    ack = getline(nextSock)
-    print(f"Receives an acknowledgement {ack}")
-    nextSock.close()
-
-#closestSock = socket(AF_INET, SOCK_STREAM)
-#    closestSock.connect((IP, port))
+   ack = updatePeer(NEXT_PEER)
 
     if ack == "OK":
         closestSock.send("OK".encode())
@@ -371,13 +355,23 @@ def leave():
         print("Goodbye")
         exit(0)
 
-
     pass
 
-#FIXME
-def updatePeer():
-    msg = "UPDATE_PEER_"
-    pass
+def updatePeer(peer):
+
+    IP, Port = peer.split(":")
+    Port = int(Port)
+    sock = socket(AF_INET, SOCK_STREAM)
+    sock.connect((IP, Port))
+    print("Connected")
+    sock.send("UPDATE_PEER_".encode())
+    print("sent UPDATE_PEER_")
+    sendUserID(MY_ADDR.split(":")[0], int(MY_ADDR.split(":")[1]), sock)
+    print("send ack")
+    ack = recvMsg(sock, 2)
+    print(f"Receives an acknowledgement {ack}")
+    sock.close()
+    return ack
 
 
 def getData(fileName):
