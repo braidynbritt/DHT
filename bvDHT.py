@@ -8,19 +8,32 @@ import threading
 from pathlib import Path
 import os
 
+#This is the address of the next person in the dht
 NEXT_PEER = ""
+
+#This is the address of the previous person in the dht
 PREV_PEER = ""
+
+#This is our address
 MY_ADDR = ""
 MY_IP = ""
 MY_PORT = 0
 
+#This is now many different people we'll know in dht
 NUM_FINGERS = 5
+
+#Finger table will be all the people we know in the dht. This includes
+#the previous, next, and our own address and then the number of fingers
+#addresses
 FINGER_TABLE = []
 FINGERS = []
+
+#These are the possible commands for the user
 COMMANDS = ['leave', 'get', 'contains', 'insert', 'delete']
 
 listeningPort = None
 
+#This will help us get a users ip address
 def getLocalIPAddress():
     s = socket(AF_INET, SOCK_DGRAM)
     s.connect(("8.8.8.8", 80))
@@ -51,10 +64,12 @@ def printFingers():
             print("   {}".format(finger[0]))
             i = i+1
 
+#This creates the hash position based on a ip and port
 def getHashKey(key):
     hashedKey = hashlib.sha224(key.encode()).hexdigest()
     return hashedKey
 
+#This sends the user id to a desired port
 def sendUserID(IP, port, sock):
     userID = IP + ":" + str(port) + "\n"
     sock.send(userID.encode())
@@ -70,6 +85,7 @@ def getline(conn):
         msg += ch
     return msg.decode()
 
+#This will receive a message of a specified length
 def recvMsg(sock, numBytes):
     msg = b''
     while(len(msg) < numBytes):
@@ -81,12 +97,15 @@ def recvMsg(sock, numBytes):
 
     return msg
 
+#This reads in  all the bytes of a specifed file
 def readFile(fileHashPos, dest):
+    #This is for files that aren't in the dht yet
     if dest == "local":
         inFile = open(f"{fileHashPos}", "rb")
     else:
         inFile = open(f"dht/{fileHashPos}", "rb")
 
+    #Read in a byte at a time till its done
     fileBytes = []
     byte = inFile.read(1)
     while byte:
@@ -95,7 +114,7 @@ def readFile(fileHashPos, dest):
     inFile.close()
     return fileBytes
 
-
+#Sends a files hash position, file size, and the file bytes to a specified port
 def sendFile(fileHashPos, fileBytes, sock):
     sz = len(fileBytes)
     sz = str(sz) + "\n"
@@ -104,27 +123,30 @@ def sendFile(fileHashPos, fileBytes, sock):
     for byte in fileBytes:
         sock.send(byte)
 
+#This stores a sent file either locally or on the dht
 def recvFile(fileHashPos, sock, dest):
     fileSize = getline(sock)
     fileSize = int(fileSize)
-    print("before data")
     data = recvMsg(sock, fileSize)
-    print("after data")
-
+    
+    #Stores it locally
     if dest == "local":
         path = Path('./'+ str(fileHashPos))
+    #Stores it in the dht
     else:
         path = Path('./dht/' + str(fileHashPos))
 
     with open(path, 'wb') as outFile:
         outFile.write(data)
 
+#This gets all the files we own in the dht
 def getMyFiles():
     fileKeys = os.listdir('./dht')
     return fileKeys
 
+#This will transfer files from one peer to anothe
 def transferFiles(sock, connectorHash, Type):
-    # Retreive files available for sending
+    # Retreive files all files we are able to send in the dht
     folder = Path("./dht")
     if not folder.exists():
         folder.mkdir(parents=True, exist_ok=True)
@@ -136,7 +158,8 @@ def transferFiles(sock, connectorHash, Type):
     # Get number of files to send
     filesToSend = []
     prevHash = getHashKey(PREV_PEER)
-
+    
+    #This will decide what files to actually send to someone who has joined
     if Type == "JOIN":
         # Find which files to transfer considering wrap around
         if prevHash < connectorHash:
@@ -152,7 +175,7 @@ def transferFiles(sock, connectorHash, Type):
         # Add all files we own
         filesToSend = getMyFiles()
 
-    # Send number of files followed by each file following protocol
+    # Send number of files, then call sendFile on each of the files
     sz = len(filesToSend)
     sz = str(sz) + '\n'
     sock.send(sz.encode())
@@ -162,7 +185,7 @@ def transferFiles(sock, connectorHash, Type):
 
     return filesToSend
 
-
+#This is used to delete files from the dht
 def deleteFiles(toDelete):
     for f in toDelete:
         try:
@@ -173,32 +196,47 @@ def deleteFiles(toDelete):
             print(f"File not deleted {f}")
             return False
 
+#This is the start of a thread that will handle user inputs
 def listen(listener):
     running = True
     while running:
         conn, addr = listener.accept()
         handleRequests(conn, addr)
 
+#This has all the different possible requests the dht supports
 def handleRequests(sock, connAddr):
     global PREV_PEER, NEXT_PEER
     command = recvMsg(sock, 12).decode()
+
+    #protocol for joining the dht
     if command == "JOIN_DHT_NOW":
         senderAddr = getline(sock)
         sock.send((f'{NEXT_PEER}\n').encode())
+        #set next peer
         NEXT_PEER = senderAddr
+
+        #adjust the finger table appropriately
         updateFingers(NEXT_PEER)
         updateFingerTable()
+
+        #share files to the new person
         files = transferFiles(sock, getHashKey(senderAddr),"JOIN")
         deleteFiles(files)
-
+    
+    #protocol for finding the closest peer
     elif command == "CLOSEST_PEER":
         key = recvMsg(sock, 56).decode()
         closest = closestToKey(key)
         closestIP, closestPort = closest.split(":")
-        sendUserID(closestIP, closestPort, sock)
 
+        #sends closest person to sender
+        sendUserID(closestIP, closestPort, sock)
+    
+    #protocol for inserting a file
     elif command == "INSERT_FILE!":
         key = recvMsg(sock, 56).decode()
+
+        #Find the address in which the file should be inserted at
         closest = closestToKey(key)
         if closest == MY_ADDR:
             sock.send("OK".encode())
@@ -208,11 +246,14 @@ def handleRequests(sock, connAddr):
         else:
             sock.send("FU".encode())
 
+    #protocol for deleting a file
     elif command == "DELETE_FILE!":
+        #receive file hash position
         key = recvMsg(sock, 56).decode()
         closest = closestToKey(key)
         if closest == MY_ADDR:
             sock.send("OK".encode())
+            #delete the file based on the hash position
             if deleteFiles([key]) == True:
                 sock.send("OK".encode())
 
@@ -220,29 +261,36 @@ def handleRequests(sock, connAddr):
                 sock.send("FU".encode())
         else:
             sock.send("FU".encode())
-
+    
+    #protocol for leaving
     elif command == "TIME_2_SPLIT":
+        #receives all the files from the person leaving the dht
         fileNum = int(getline(sock))
         for i in range(0, fileNum):
             key = recvMsg(sock, 56).decode()
             recvFile(key, sock, "")
 
+        #receive who their new next is
         newNext = getline(sock)
+        #reset the complete finger table because there is only one person in the dht
         if PREV_PEER == NEXT_PEER:
             resetFingerTable()
-
+        #update finger table by removing the peer that left
         else:
             NEXT_PEER = newNext
             removeFromFingerTable(NEXT_PEER)
             updatePeer(NEXT_PEER)
             
         sock.send("OK".encode())
-        
+    
+    #protocol for seeing if a file is contained in the dht
     elif command == "CONTAIN_FILE":
         key = recvMsg(sock, 56).decode()
+        #find the closest person to the file hash position
         closest = closestToKey(key)
         if closest == MY_ADDR:
             sock.send("OK".encode())
+            #check to see if the closest has the file
             if containedLocal(key) == True:
                 sock.send("OK".encode())
 
@@ -250,13 +298,14 @@ def handleRequests(sock, connAddr):
                 sock.send("FU".encode())
         else:
             sock.send("FU".encode())
-
+    
+    #protocol for getting a file
     elif command == "GET_DATA_NOW":
         key = recvMsg(sock, 56).decode()
         closest = closestToKey(key)
         if closest == MY_ADDR:
             sock.send("OK".encode())
-
+            #see if our closest has the file and then read in the file
             if containedLocal(key) == True:
                 sock.send("OK".encode())
                 fileBytes = readFile(key, "")
@@ -267,16 +316,21 @@ def handleRequests(sock, connAddr):
         else:
             sock.send("FU".encode())
 
+    #protocol for updating a peer
     elif command == "UPDATE_PEER_":
         user = getline(sock)
         PREV_PEER = user
+
+        #This is for when there is only two people in the dht
         if NEXT_PEER == MY_ADDR:
             NEXT_PEER = PREV_PEER
-
+        
+        #update the finger table with the new previous peer
         updateFingers(PREV_PEER)
         updateFingerTable()
         sock.send("OK".encode())
 
+#This sends the closest_peer request to see owns the hash that we send
 def closestPeer(Addr, key):
     if Addr == MY_ADDR:
         return Addr
@@ -297,18 +351,20 @@ def closestPeer(Addr, key):
             return recvAddr
             
         askAddr = recvAddr
-
     return recvAddr
 
-
+#This function will join someone to the dht based on the passed ip and port
 def join(IP, port):
     global PREV_PEER, NEXT_PEER, FINGERS, MY_IP, MY_PORT
     port = int(port)
     addr = IP+":"+str(port)
+    #See who is closest to our hash postion
     closestAddr = closestPeer(addr, getHashKey(addr))
     closestIP, closestPort = closestAddr.split(":")
     closestSock = socket(AF_INET, SOCK_STREAM)
     closestSock.connect((IP, port))
+
+    #call the join protocol on the closest peer we just found
     msg = "JOIN_DHT_NOW"
     closestSock.send(msg.encode())
     sendUserID(MY_IP, MY_PORT, closestSock)
@@ -316,6 +372,8 @@ def join(IP, port):
     #receive our new next UserID
     NEXT_PEER = getline(closestSock)
     PREV_PEER = closestAddr
+
+    #Create our finger table
     FINGER_TABLE = []
     offsets = createFingerOffsets(MY_ADDR)
     for finger in offsets:
@@ -332,10 +390,10 @@ def join(IP, port):
     numFiles = int(numFiles)
     if numFiles > 0:
         for i in range(numFiles):
-            #recieve files hashedPosition
+            #receive files hashedPosition
             fileHashPos = recvMsg(closestSock, 56).decode()
             recvFile(fileHashPos, closestSock, "")
-
+ 
     ack = updatePeer(NEXT_PEER)
     if ack == "OK":
         closestSock.send("OK".encode())
@@ -504,12 +562,14 @@ def delete(fileName):
         else:
             print(f"This dht system does not have {fileName}") 
 
-
+#Calculates the offsets of where the fingers should be
 def createFingerOffsets(MY_ADDR):
+    #This is the max value our dht circle can store
     maxHash = "f" * 56
     maxHash = int(maxHash, 16)
     offset = int(maxHash / (NUM_FINGERS +1))
 
+    #calculate the key and type cast it to int
     key = hashlib.sha224(MY_ADDR.encode()).hexdigest()
     key = int(key,16)
 
@@ -517,6 +577,7 @@ def createFingerOffsets(MY_ADDR):
 
     for i in range(NUM_FINGERS):
         if key+(offset *(i+1))> maxHash:
+            #To deal with wrap around we took the larger number and subtracted the maxHash
             off = hex((key+ (offset * (i+1))) - maxHash)[2:]
             if len(off) < 56:
                 off = off +"0"
