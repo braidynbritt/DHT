@@ -8,9 +8,6 @@ import threading
 from pathlib import Path
 import os
 
-
-printLock = threading.Lock()
-
 NEXT_PEER = ""
 PREV_PEER = ""
 MY_ADDR = ""
@@ -23,7 +20,6 @@ FINGERS = []
 COMMANDS = ['leave', 'get', 'contains', 'insert', 'delete']
 
 listeningPort = None
-
 
 def getLocalIPAddress():
     s = socket(AF_INET, SOCK_DGRAM)
@@ -59,10 +55,8 @@ def getHashKey(key):
     hashedKey = hashlib.sha224(key.encode()).hexdigest()
     return hashedKey
 
-
 def sendUserID(IP, port, sock):
     userID = IP + ":" + str(port) + "\n"
-    print(f"SENDING: {userID=}")
     sock.send(userID.encode())
 
 # Retrieves stuff until we hit a newline
@@ -72,6 +66,7 @@ def getline(conn):
         ch = conn.recv(1)
         if ch == b'\n' or len(ch) == 0:
             break
+
         msg += ch
     return msg.decode()
 
@@ -81,6 +76,7 @@ def recvMsg(sock, numBytes):
         temp = sock.recv(numBytes- len(msg))
         if len(temp) == 0:
             break
+
         msg += temp
 
     return msg
@@ -99,45 +95,38 @@ def readFile(fileHashPos, dest):
     return fileBytes
 
 def sendFile(fileHashPos, fileBytes, sock):
-    print("send File")
     sz = len(fileBytes)
     sz = str(sz) + "\n"
-#sock.send(fileHashPos.encode())
+    sock.send(fileHashPos.encode())
     sock.send(sz.encode())
     for byte in fileBytes:
         sock.send(byte)
 
 def recvFile(fileHashPos, sock, dest):
     fileSize = getline(sock)
-    print(fileSize)
     fileSize = int(fileSize)
-    
     data = recvMsg(sock, fileSize)
 
     if dest == "local":
-        print(type(fileHashPos))
         path = Path('./'+ str(fileHashPos))
     else:
         path = Path('./dht/' + str(fileHashPos))
 
     with open(path, 'wb') as outFile:
         outFile.write(data)
-    
+
 def getMyFiles():
     fileKeys = os.listdir('./dht')
     return fileKeys
 
 def transferFiles(sock, connectorHash, Type):
-    print("Transfer")
     # Retreive files available for sending
     folder = Path("./dht")
     if not folder.exists():
         folder.mkdir(parents=True, exist_ok=True)
     # Retrieve our file hashes
     fileHashes = []
-    print(f"{folder.iterdir}")
     for entry in folder.iterdir():
-        print(f"i{entry}")
         if not entry.is_dir():
             fileHashes.append(entry.name)
     # Get number of files to send
@@ -160,7 +149,6 @@ def transferFiles(sock, connectorHash, Type):
         filesToSend = getMyFiles()
 
     # Send number of files followed by each file following protocol
-    print(f"files to send {filesToSend}")
     sz = len(filesToSend)
     sz = str(sz) + '\n'
     sock.send(sz.encode())
@@ -187,59 +175,43 @@ def listen(listener):
         conn, addr = listener.accept()
         handleRequests(conn, addr)
 
-#FIXME
 def handleRequests(sock, connAddr):
     global PREV_PEER, NEXT_PEER
     command = recvMsg(sock, 12).decode()
-    print(f"COMMAND {command}")
-
-###################FIXME######################
     if command == "JOIN_DHT_NOW":
         senderAddr = getline(sock)
-
         sock.send((f'{NEXT_PEER}\n').encode())
-        print("After sending next")
-
         NEXT_PEER = senderAddr
-
-        print(NEXT_PEER)
-        print(f'Hash: {getHashKey(NEXT_PEER)}')
-        
         updateFingers(NEXT_PEER)
-
         updateFingerTable()
-
         files = transferFiles(sock, getHashKey(senderAddr),"JOIN")
         deleteFiles(files)
-        
 
     elif command == "CLOSEST_PEER":
-        print("Handling CLOSEST_PEER request...")
         key = recvMsg(sock, 56).decode()
-        print(f"  - {key=}")
         closest = closestToKey(key)
         closestIP, closestPort = closest.split(":")
-        print(f"  - ({closestIP=}, {closestPort=})")
         sendUserID(closestIP, closestPort, sock)
+
     elif command == "INSERT_FILE!":
         key = recvMsg(sock, 56).decode()
-
-        print(f" - {key=}")
         closest = closestToKey(key)
         if closest == MY_ADDR:
             sock.send("OK".encode())
             recvFile(key, sock, "")
             sock.send("OK".encode())
+
         else:
             sock.send("FU".encode())
+
     elif command == "DELETE_FILE!":
-        print("DELETE FILE")
         key = recvMsg(sock, 56).decode()
         closest = closestToKey(key)
         if closest == MY_ADDR:
             sock.send("OK".encode())
             if deleteFiles([key]) == True:
                 sock.send("OK".encode())
+
             else:
                 sock.send("FU".encode())
         else:
@@ -247,157 +219,126 @@ def handleRequests(sock, connAddr):
 
     elif command == "TIME_2_SPLIT":
         fileNum = int(getline(sock))
-        print(f"fileNum : {fileNum}")
         for i in range(0, fileNum):
             key = recvMsg(sock, 56).decode()
-            print(f"key : {key}")
-
             recvFile(key, sock, "")
 
         newNext = getline(sock)
         if PREV_PEER == NEXT_PEER:
             resetFingerTable()
+
         else:
-            removeFromFingerTable(NEXT_ADDR)
-            NEXT_ADDR = newSucc
+            NEXT_PEER = newNext
+            removeFromFingerTable(NEXT_PEER)
             updatePeer(NEXT_PEER)
             
-            
-        print("all good in the leave")
         sock.send("OK".encode())
         
     elif command == "CONTAIN_FILE":
-        print("Contains File")
         key = recvMsg(sock, 56).decode()
         closest = closestToKey(key)
         if closest == MY_ADDR:
             sock.send("OK".encode())
             if containedLocal(key) == True:
                 sock.send("OK".encode())
+
             else:
                 sock.send("FU".encode())
         else:
             sock.send("FU".encode())
 
     elif command == "GET_DATA_NOW":
-        print("GET")
         key = recvMsg(sock, 56).decode()
         closest = closestToKey(key)
         if closest == MY_ADDR:
             sock.send("OK".encode())
+
             if containedLocal(key) == True:
                 sock.send("OK".encode())
                 fileBytes = readFile(key, "")
                 sendFile(key, fileBytes, sock)
+
             else:
                 sock.send("FU".encode())
         else:
             sock.send("FU".encode())
 
     elif command == "UPDATE_PEER_":
-        print("UPDATE")
         user = getline(sock)
         PREV_PEER = user
         if NEXT_PEER == MY_ADDR:
             NEXT_PEER = PREV_PEER
+
         updateFingers(PREV_PEER)
-
         updateFingerTable()
-        
         sock.send("OK".encode())
-
 
 def closestPeer(Addr, key):
     if Addr == MY_ADDR:
         return Addr
+
     askAddr = Addr
     recvAddr = None
     while askAddr != recvAddr:
         askAddrList = askAddr.split(":")
         closestSock = socket(AF_INET, SOCK_STREAM)
         closestSock.connect((askAddrList[0], int(askAddrList[1])))
-
         msg = "CLOSEST_PEER"
         closestSock.send(msg.encode())
-
         closestSock.send(key.encode())
         recvAddr = getline(closestSock)
-
         closestSock.close()
+
         if recvAddr == askAddr:
             return recvAddr
+            
         askAddr = recvAddr
 
     return recvAddr
 
 
 def join(IP, port):
-    
     global PREV_PEER, NEXT_PEER, FINGERS, MY_IP, MY_PORT
     port = int(port)
     addr = IP+":"+str(port)
     closestAddr = closestPeer(addr, getHashKey(addr))
-    print(f"Here is the closest {closestAddr}")
     closestIP, closestPort = closestAddr.split(":")
     closestSock = socket(AF_INET, SOCK_STREAM)
     closestSock.connect((IP, port))
-
     msg = "JOIN_DHT_NOW"
     closestSock.send(msg.encode())
     sendUserID(MY_IP, MY_PORT, closestSock)
     
     #receive our new next UserID
-    print("before NEXT")
     NEXT_PEER = getline(closestSock)
-    print("NEXT")
     PREV_PEER = closestAddr
-    print("PREV")
-
     FINGER_TABLE = []
     offsets = createFingerOffsets(MY_ADDR)
-
     for finger in offsets:
         FINGERS.append((finger, MY_ADDR))
 
     updateFingers(PREV_PEER)
     updateFingers(NEXT_PEER)
-
     updateFingerTable()
-
-    print("FINGERS!!!")
     if PREV_PEER != NEXT_PEER:
         setFingers(PREV_PEER)
 
-
     #receive the number of files we are taking
     numFiles = getline(closestSock)
-
-    print(numFiles)
     numFiles = int(numFiles)
-
     if numFiles > 0:
         for i in range(numFiles):
             #recieve files hashedPosition
-            print("before")
             fileHashPos = recvMsg(closestSock, 56).decode()
-            print("after")
-            print(fileHashPos)
             recvFile(fileHashPos, closestSock, "")
 
-
-
     ack = updatePeer(NEXT_PEER)
-
     if ack == "OK":
         closestSock.send("OK".encode())
 
     closestSock.close()
-
-    print("JOINED")
-    
     
 #This only works if there is only one person in the dht
-#FIXME
 def leave():
     msg = "TIME_2_SPLIT"
     #Shuts down the system if only one person is in it
@@ -406,60 +347,42 @@ def leave():
         exit(0)
     else:
         key = getHashKey(MY_ADDR)
-
         prevIP, prevPort = PREV_PEER.split(":")
         prevSock = socket(AF_INET, SOCK_STREAM)
         prevSock.connect( (prevIP, int(prevPort)))
         prevSock.send(msg.encode())
-
         transferFiles(prevSock, key, "")
-
-        prevSock.send(NEXT_PEER.encode())
-
-        print("before ack")
+        prevSock.send((f'{NEXT_PEER}\n').encode())
         ack = recvMsg(prevSock, 2).decode()
-        print("after ack")
-
         if ack == "OK":
             prevSock.close()
             print("Goodbye")
             exit(0)
 
-
-
 def updatePeer(peer):
-    print("updating peer")
     IP, Port = peer.split(":")
     Port = int(Port)
     sock = socket(AF_INET, SOCK_STREAM)
     sock.connect((IP, Port))
-    print("Connected")
     sock.send("UPDATE_PEER_".encode())
-    print("sent UPDATE_PEER_")
     sendUserID(MY_ADDR.split(":")[0], int(MY_ADDR.split(":")[1]), sock)
-    print("send ack")
     ack = recvMsg(sock, 2).decode()
-    print(f"Receives an acknowledgement {ack}")
     sock.close()
     return ack
-
 
 def getData(fileName):
     msg = "GET_DATA_NOW"
 
     key = getHashKey(fileName)
     if containedLocal(key) == True:
-        print(f"Copying {fileName} from dht to your local directory")
         shutil.copy(f"dht/{key}", key)
     else:
         if contains(fileName):
-            print("The file is here")
             closestAddr = closestToKey(key)
             closest = closestAddr.split(":")
             sock = socket(AF_INET, SOCK_STREAM)
             sock.connect((closest[0], int(closest[1])))
             sock.send(msg.encode())
-
             sock.send(key.encode())
             ack = recvMsg(sock, 2).decode()
             if ack == "FU":
@@ -475,14 +398,12 @@ def getData(fileName):
         else:
             print(f"{fileName} does not exist anymore.")
 
-
-
 def contains(fileName):
     msg = "CONTAIN_FILE"
     key = getHashKey(fileName)
     if containedLocal(key) == True:
-        print(f"You own {fileName}")
         return True
+
     else:
         askAddr = closestToKey(key)
         recvAddr = closestPeer(askAddr, key)
@@ -493,7 +414,6 @@ def contains(fileName):
             sock.send(msg.encode())
             sock.send(key.encode())
             ack = recvMsg(sock, 2).decode()
-
             if ack == "FU":
                 contains(fileName)
 
@@ -501,22 +421,20 @@ def contains(fileName):
             if ack == "FU":
                 print(f"{fileName} was not found")
                 return False
+
             else:
                 print(f"{fileName} found")
                 return True
 
-
-#FIXME
 def insert(fileName):
     files = os.listdir('.')
     if fileName not in files:
         print(f"You don't have a file named {fileName}")
         return
+
     msg = "INSERT_FILE!"
     key = getHashKey(fileName)
-
     storeAddr = closestToKey(key)
-
     if storeAddr == MY_ADDR:
         print(f"Storing {fileName} locally")
         shutil.copy(fileName, f"dht/{key}")
@@ -527,13 +445,17 @@ def insert(fileName):
         sock = socket(AF_INET, SOCK_STREAM)
         sock.connect((closest[0], int(closest[1])))
         sock.send(msg.encode())
-        sock.send(key.encode())
         ack = recvMsg(sock, 2).decode()
         if ack == "FU":
             insert(fileName)
+
         else:
             fileBytes = readFile(fileName, "local")
-            sendFile(key, fileBytes, sock, "get")
+            sz = len(fileBytes)
+            sz = str(sz) + '\n'
+            sock.send(sz.encode())
+            for byte in fileBytes:
+                sock.send(byte)
 
             ack = recvMsg(sock, 2).decode()
             if ack == "OK":
@@ -603,13 +525,9 @@ def createFingerOffsets(MY_ADDR):
 
 def updateFingerTable():
     global FINGER_TABLE, FINGERS
-    print(f'FINGERS: {FINGERS}')
     FINGER_TABLE = FINGERS
     FINGER_TABLE.sort()
-    printLock.acquire()
     printFingers()
-    printLock.release()
-
 
 def updateFingers(peerAddr):
     global FINGERS
@@ -617,68 +535,57 @@ def updateFingers(peerAddr):
     for i in range(len(FINGERS)):
         currFingKey = getHashKey(FINGERS[i][1])
         # i = 1 and wrap around
-        print(f"TYPE: {type(FINGERS[-1][0])}")
-        print(f'currFing: {currFingKey}')
-        print(f'FINGER[I]: {FINGERS[i][0]}')
-        print(f'peerKey: {peerKey}')
         if i == 0 and FINGERS[-1][0] > FINGERS[i][0]:
-            print("IN IF")
             # is current finger value in keyspace
             if currFingKey > FINGERS[-1][0] or currFingKey < FINGERS[i][0]:
-                print("IN FIRST IF")
                 if currFingKey > FINGERS[-1][0]:
-                    print("IN SECOND IF")
                     if peerKey < FINGERS[i][0] or peerKey > currFingKey:
-                        print("IN THIRD IF")
                         FINGERS[i] = (FINGERS[i][0], peerAddr)
+
                 elif peerKey > currFingKey and peerKey < FINGERS[i][0]:
-                    print("IN SECOND ELIF")
                     FINGERS[i] = (FINGERS[i][0], peerAddr)
+
             elif peerKey > currFingKey or peerKey < FINGERS[i][0]:
-                print("IN FIRST ELIF")
                 FINGERS[i] = (FINGERS[i][0], peerAddr)
+
         # i != 1 and wrap around
         elif i > 0 and FINGERS[i-1][0] > FINGERS[i][0]:
-            print("IN ELIF")
             # is current finger value in keyspace
             if currFingKey > FINGERS[i-1][0] or currFingKey < FINGERS[i][0]:
                 if currFingKey > FINGERS[i-1][0]:
                     if peerKey < FINGERS[i][0] or peerKey > currFingKey:
                         FINGERS[i] = (FINGERS[i][0], peerAddr)
+
                 elif peerKey > currFingKey and peerKey < FINGERS[i][0]:
                     FINGERS[i] = (FINGERS[i][0], peerAddr)
+
             elif peerKey > currFingKey or peerKey < FINGERS[i][0]:
                 FINGERS[i] = (FINGERS[i][0], peerAddr)
+
         # any i no wrap around
         else:
-            print("IN ELSE")
             # is current finger value in keyspace
             if currFingKey < FINGERS[i][0] and currFingKey > FINGERS[i-1][0]:
-                print("IN FIRST IF")
                 if peerKey < FINGERS[i][0] and peerKey > currFingKey:
-                    print("IN SECOND IF")
                     FINGERS[i] = (FINGERS[i][0], peerAddr)
+
             else:
-                print("IN FIRST ELSE")
                 if currFingKey > FINGERS[i][0]:
-                    print("IN FIRST IF OF ELSE")
                     if peerKey > currFingKey or peerKey < FINGERS[i][0]:
-                        print("IN SECOND IF OF ELSE")
                         FINGERS[i] = (FINGERS[i][0], peerAddr)
+
                 else:
-                    print("IN ELSE OF ELSE")
                     if peerKey > currFingKey and peerKey < FINGERS[i][0]:
-                        print("IN IF IN ELSE OF ELSE")
                         FINGERS[i] = (FINGERS[i][0], peerAddr)
 
 def setFingers(Addr):
     global FINGERS
-
     FINGERS = []
     offsets = createFingerOffsets(MY_ADDR)
     for finger in offsets:
         recvAddress = closestPeer(Addr, finger)
         FINGERS.append((finger, recvAddress))
+
     updateFingerTable()
 
 def removeFromFingerTable(addr):
@@ -687,6 +594,17 @@ def removeFromFingerTable(addr):
         if FINGERS[i][1] == addr:
             FINGERS[i] = (FINGERS[i][0], MY_ADDR)
 
+    updateFingerTable()
+
+def resetFingerTable():
+    global FINGERS, PREV_PEER, NEXT_PEER
+    FINGERS = []
+    offsets = createFingerOffsets(MY_ADDR)
+    for i in range(len(offsets)):
+        FINGERS.append((offsets[i], MY_ADDR))
+    
+    PREV_PEER = MY_ADDR
+    NEXT_PEER = MY_ADDR
     updateFingerTable()
 
 # Finds out who we know that is closest to the key
@@ -735,23 +653,17 @@ if __name__ == '__main__':
     listener.listen(32)
 
     #Set my address
-    #host = gethostname()
     ip = getLocalIPAddress()
     MY_IP = ip
     MY_PORT = listeningPort
-    MY_ADDR = f"{ip}:{listeningPort}"
-    print(f"Our address: {MY_ADDR}")
-
+    MY_ADDR = f'{ip}:{listeningPort}'
     # Check for repository to store files
     folder = Path('./dht')
     if not folder.exists():
         folder.mkdir(parents=True, exist_ok=True)
-#    else:
-#        shutil.rmtree(folder)
-#        folder.mkdir(parents=True, exist_ok=True)
-
-    #for fileName in os.listdir(Path.cwd() / 'dht/'):
-    #    os.rename(f'{Path.cwd()}/dht/{fileName}', f'{Path.cwd()}/dht/{getHashKey(fileName)}')
+    else:
+        shutil.rmtree(folder)
+        folder.mkdir(parents=True, exist_ok=True)
 
     if len(sys.argv) == 1:
         startNewSystem()
@@ -762,16 +674,8 @@ if __name__ == '__main__':
     else:
         print("Wrong amount of arguments were passed")
     
-    print("Before listen thread")
     listenThread = threading.Thread(target=listen, args=(listener,),daemon=True).start()
-    print("after listen thread")
-    
-    print(f"My key: {getHashKey(MY_ADDR)}")
-    printLock.acquire()
     printFingers()
-    printLock.release()
-
-
 
     running = True
     while running:
