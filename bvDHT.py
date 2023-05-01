@@ -92,7 +92,9 @@ def readFile(fileHashPos, dest):
     while byte:
         fileBytes.append(byte)
         byte = inFile.read(1)
+    inFile.close()
     return fileBytes
+
 
 def sendFile(fileHashPos, fileBytes, sock):
     sz = len(fileBytes)
@@ -105,7 +107,9 @@ def sendFile(fileHashPos, fileBytes, sock):
 def recvFile(fileHashPos, sock, dest):
     fileSize = getline(sock)
     fileSize = int(fileSize)
+    print("before data")
     data = recvMsg(sock, fileSize)
+    print("after data")
 
     if dest == "local":
         path = Path('./'+ str(fileHashPos))
@@ -402,6 +406,7 @@ def contains(fileName):
     msg = "CONTAIN_FILE"
     key = getHashKey(fileName)
     if containedLocal(key) == True:
+        print(f"You own {fileName}")
         return True
 
     else:
@@ -445,6 +450,7 @@ def insert(fileName):
         sock = socket(AF_INET, SOCK_STREAM)
         sock.connect((closest[0], int(closest[1])))
         sock.send(msg.encode())
+        sock.send(key.encode())
         ack = recvMsg(sock, 2).decode()
         if ack == "FU":
             insert(fileName)
@@ -457,6 +463,7 @@ def insert(fileName):
             for byte in fileBytes:
                 sock.send(byte)
 
+            print("ack")
             ack = recvMsg(sock, 2).decode()
             if ack == "OK":
                 sock.close()
